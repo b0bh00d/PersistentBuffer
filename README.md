@@ -20,13 +20,13 @@ provides the following benefits:
 The included test main.cpp file shows how it might be used, and also
 shows statistics of the speed of the class via various methods:
 
-`
+```
      single_buffer(): 167.532 ms
 single_buffer_from(): 167.342 ms
    release_buffers(): 405.371 ms
 
 10 buffers were allocated out of 12000000 buffer requests.
-`
+```
 
 On Windows, compile with: cl /O2 /EHsc main.cpp PersistentBuffer.cpp
 
