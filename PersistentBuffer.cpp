@@ -1,6 +1,7 @@
 #include <cassert>
 #include <sstream>
 #include <algorithm>
+#include <iostream>
 
 #include "PersistentBuffer.h"
 
@@ -13,6 +14,36 @@ int PersistentBuffer::m_buffers_in_use{0};
 PersistentBuffer::SizeList PersistentBuffer::m_size_list;
 
 static bool m_initialized{false};
+
+#if PERSISTENTBUFFER_TRACKING >= 2
+using tracking_data_t = std::pair<std::string, int>;
+using tracking_map_t = std::map<const void*, tracking_data_t>;
+static tracking_map_t _tracking_map;
+#endif
+
+//----------------------------------------------------------------------------
+// PersistentBuffer::Buffer methods
+
+uint8_t const * const PersistentBuffer::Buffer::ro() const
+{
+	if (m_in_use)
+		return m_buffer.get();
+
+	assert(false);
+	return nullptr;
+}
+
+uint8_t * const PersistentBuffer::Buffer::rw() const
+{
+	if (m_in_use)
+		return m_buffer.get();
+
+	assert(false);
+	return nullptr;
+}
+
+//----------------------------------------------------------------------------
+// PersistentBuffer methods
 
 void PersistentBuffer::initialize()
 {
@@ -53,23 +84,107 @@ void PersistentBuffer::reset()
 	m_buffers.clear();
 }
 
-PersistentBuffer::BufferPtr PersistentBuffer::single_buffer(uint32_t min_size)
+PersistentBuffer::BufferPtr PersistentBuffer::single_buffer(uint32_t min_size
+#if PERSISTENTBUFFER_TRACKING >= 2
+	, const tracking_data_t& caller
+#endif
+)
 {
 	std::unique_lock<std::mutex> buffers_lock(m_buffers_lock);
-	return single_buffer_unprotected(min_size);
+	auto buffer{single_buffer_unprotected(min_size)};
+#if PERSISTENTBUFFER_TRACKING >= 2
+	if (!caller.first.empty())
+	{
+		auto key{static_cast<const void *>(buffer->ro())};
+		_tracking_map[key] = caller;
+		std::cerr << "+++ buffer " << key << " allocated by " << caller.first << ":"
+			<< caller.second << std::endl;
+		std::cerr.flush();
+	}
+#endif
+#if PERSISTENTBUFFER_TRACKING == 1 || PERSISTENTBUFFER_TRACKING == 3
+	std::cerr << "<< " << m_size_list.size() << " buffers allocated, "
+		<< m_buffers_in_use << " buffers in use, "
+		<< (m_size_list.size() - m_buffers_in_use) << " buffers free."
+		<< std::endl;
+	std::cerr.flush();
+#endif
+  return buffer;
 }
 
 // get a buffer with the required 'size' holding the provided content
-PersistentBuffer::BufferPtr PersistentBuffer::single_buffer_from(const char* data, size_t size)
+PersistentBuffer::BufferPtr PersistentBuffer::single_buffer_from(const std::string& data
+#if PERSISTENTBUFFER_TRACKING >= 2
+	, const tracking_data_t& caller
+#endif
+)
 {
-	return single_buffer_from(reinterpret_cast<const uint8_t*>(data), static_cast<uint32_t>(size));
+	auto buffer{single_buffer_from(reinterpret_cast<const uint8_t*>(data.c_str()), static_cast<uint32_t>(data.length() + 1))};
+#if PERSISTENTBUFFER_TRACKING >= 2
+	if (!caller.first.empty())
+	{
+		auto key{static_cast<const void*>(buffer->ro())};
+		_tracking_map[key] = caller;
+		std::cerr << "+++ buffer " << key << " allocated by " << caller.first << ":" << caller.second << std::endl;
+		std::cerr.flush();
+	}
+#endif
+#if PERSISTENTBUFFER_TRACKING == 1 || PERSISTENTBUFFER_TRACKING == 3
+	std::cerr << "<< " << m_size_list.size() << " buffers allocated, " << m_buffers_in_use << " buffers in use, "
+			<< (m_size_list.size() - m_buffers_in_use) << " buffers free." << std::endl;
+	std::cerr.flush();
+#endif
+	return buffer;
 }
 
-PersistentBuffer::BufferPtr PersistentBuffer::single_buffer_from(const uint8_t* data, uint32_t size)
+PersistentBuffer::BufferPtr PersistentBuffer::single_buffer_from(const char* data, size_t size
+#if PERSISTENTBUFFER_TRACKING >= 2
+	, const tracking_data_t& caller
+#endif
+)
+{
+	auto buffer{single_buffer_from(reinterpret_cast<const uint8_t*>(data), static_cast<uint32_t>(size))};
+#if PERSISTENTBUFFER_TRACKING >= 2
+	if (!caller.first.empty())
+	{
+		auto key{static_cast<const void*>(buffer->ro())};
+		_tracking_map[key] = caller;
+		std::cerr << "+++ buffer " << key << " allocated by " << caller.first << ":" << caller.second << std::endl;
+		std::cerr.flush();
+	}
+#endif
+#if PERSISTENTBUFFER_TRACKING == 1 || PERSISTENTBUFFER_TRACKING == 3
+	std::cerr << "<< " << m_size_list.size() << " buffers allocated, " << m_buffers_in_use << " buffers in use, "
+			  << (m_size_list.size() - m_buffers_in_use) << " buffers free." << std::endl;
+	std::cerr.flush();
+#endif
+	return buffer;
+}
+
+PersistentBuffer::BufferPtr PersistentBuffer::single_buffer_from(const uint8_t* data, uint32_t size
+#if PERSISTENTBUFFER_TRACKING >= 2
+	, const tracking_data_t& caller
+#endif
+)
 {
 	std::unique_lock<std::mutex> buffers_lock(m_buffers_lock);
-	BufferPtr buffer = single_buffer_unprotected(size);
-	memcpy(reinterpret_cast<void*>(buffer->data().get()), data, size);
+	auto buffer{single_buffer_unprotected(size)};
+	auto p{buffer->rw()};
+	memcpy(p, data, size);
+#if PERSISTENTBUFFER_TRACKING >= 2
+	if (!caller.first.empty())
+	{
+		auto key{static_cast<const void*>(p)};
+		_tracking_map[key] = caller;
+		std::cerr << "+++ buffer " << key << " allocated by " << caller.first << ":" << caller.second << std::endl;
+		std::cerr.flush();
+	}
+#endif
+#if PERSISTENTBUFFER_TRACKING == 1 || PERSISTENTBUFFER_TRACKING == 3
+	std::cerr << "<< " << m_size_list.size() << " buffers allocated, " << m_buffers_in_use << " buffers in use, "
+			  << (m_size_list.size() - m_buffers_in_use) << " buffers free." << std::endl;
+	std::cerr.flush();
+#endif
 	return buffer;
 }
 
@@ -150,7 +265,7 @@ PersistentBuffer::BufferPtr PersistentBuffer::single_buffer_unprotected(uint32_t
 	});
 	// invoking memset() here doesn't appear to have a noticible impact on performance
 	if (m_policies[Policy::ZeroBuffer])
-		memset(buffer->data().get(), 0, buffer->m_allocated);
+		memset(buffer->rw(), 0, buffer->m_allocated);
 
 	m_buffers[buffer] = true;
 	++m_buffers_in_use;
@@ -174,29 +289,83 @@ PersistentBuffer::BufferPtr PersistentBuffer::single_buffer_unprotected(uint32_t
 	return buffer;
 }
 
-bool PersistentBuffer::release_buffer(PersistentBuffer::BufferPtr buffer)
+bool PersistentBuffer::release_buffer(PersistentBuffer::BufferPtr buffer
+#if PERSISTENTBUFFER_TRACKING >= 2
+	, const tracking_data_t &caller
+#endif
+)
 {
-	std::unique_lock<std::mutex> buffers_lock(m_buffers_lock);
+	if (buffer.get() && buffer->m_in_use)
+	{
+		auto p{buffer->ro()};
 
-	m_buffers[buffer] = true;
+		std::unique_lock<std::mutex> buffers_lock(m_buffers_lock);
 
-	buffer->m_in_use = false;
-	--m_buffers_in_use;
-	buffer->m_last_used = time(nullptr);
+#if PERSISTENTBUFFER_TRACKING >= 2
+		if (!caller.first.empty()) {
+			auto key{static_cast<const void *>(p)};
+			if (_tracking_map.find(key) == _tracking_map.end())
+			std::cerr << "!!! FAILED to locate " << key
+						<< " in tracking map." << std::endl;
+			else {
+			std::cerr << "--- buffer " << key << " released by "
+						<< caller.first << ":" << caller.second << "."
+						<< std::endl;
+			_tracking_map.erase(key);
+			}
+			std::cerr.flush();
+		}
+#endif
 
+		m_buffers[buffer] = true;
+
+		buffer->m_in_use = false;
+		--m_buffers_in_use;
+		buffer->m_last_used = time(nullptr);
+#if PERSISTENTBUFFER_TRACKING == 1 || PERSISTENTBUFFER_TRACKING == 3
+		std::cerr << "<< " << m_size_list.size() << " buffers allocated, " << m_buffers_in_use << " buffers in use, "
+				<< (m_size_list.size() - m_buffers_in_use) << " buffers free." << std::endl;
+		std::cerr.flush();
+#endif
+	}
 	return true;
 }
 
-bool PersistentBuffer::release_buffers(const std::vector<PersistentBuffer::BufferPtr>& buffers)
+bool PersistentBuffer::release_buffers(const std::vector<PersistentBuffer::BufferPtr>& buffers
+#if PERSISTENTBUFFER_TRACKING >= 2
+	, const tracking_data_t& caller
+#endif
+)
 {
 	std::unique_lock<std::mutex> buffers_lock(m_buffers_lock);
 
 	for (BufferPtr buffer : buffers)
 	{
-		buffer->m_in_use = false;
-		--m_buffers_in_use;
-		buffer->m_last_used = time(nullptr);
+		if (buffer.get() && buffer->m_in_use)
+		{
+#if PERSISTENTBUFFER_TRACKING >= 2
+			if (!caller.first.empty())
+			{
+				auto key{static_cast<const void*>(buffer->ro())};
+				if (_tracking_map.find(key) == _tracking_map.end())
+					std::cerr << "!!! FAILED to locate " << key << " in tracking map." << std::endl;
+				else
+				{
+					std::cerr << "--- buffer " << key << " released by " << caller.first << ":" << caller.second << "." << std::endl;
+					_tracking_map.erase(key);
+				}
+				std::cerr.flush();
+			}
+#endif
+			buffer->m_in_use = false;
+			--m_buffers_in_use;
+			buffer->m_last_used = time(nullptr);
+		}
 	}
-
+#if PERSISTENTBUFFER_TRACKING == 1 || PERSISTENTBUFFER_TRACKING == 3
+	std::cerr << "<< " << m_size_list.size() << " buffers allocated, " << m_buffers_in_use << " buffers in use, "
+			  << (m_size_list.size() - m_buffers_in_use) << " buffers free." << std::endl;
+	std::cerr.flush();
+#endif
 	return true;
 }

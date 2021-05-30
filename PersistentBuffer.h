@@ -14,6 +14,26 @@
 
 #include <time.h>
 
+// clang-format off
+
+// 0 - Tracking off
+// 1 - Diagnostic output to stderr showing usage statics
+// 2 - Acquisition/release tracking by function/line to stderr, with on-demand acquisition state reporting
+// 3 - Enables both #1 & #2
+#define PERSISTENTBUFFER_TRACKING 0
+
+#if PERSISTENTBUFFER_TRACKING >= 2
+#ifdef _WIN32
+#define PERSISTENTBUFFER_TRACKING_DATA ,{__FUNCTION__, __LINE__}
+#else
+#define PERSISTENTBUFFER_TRACKING_DATA ,{__func__, __LINE__}
+#endif
+#else
+#define PERSISTENTBUFFER_TRACKING_DATA
+#endif
+
+// clang-format on
+
 /// @class PersistentBuffer
 /// @brief Management of persistent buffers
 ///
@@ -43,13 +63,14 @@ public: // aliases and enums
 
 	class Buffer
 	{
-	public: // aliases and enums
-		using DataPtr = std::shared_ptr<uint8_t>;
-
 	public: // methods
-		DataPtr data() const { return DataPtr(m_buffer); }
+		uint8_t const * const ro() const; // pointer is const; data is const
+		uint8_t * const rw() const;	// pointer is const; data is not
 		uint32_t size() const { return m_data_size; }
 		time_t last_used() const { return m_last_used; }
+
+	private: // aliases and enums
+		using DataPtr = std::shared_ptr<uint8_t>;
 
 	private: // methods
 		void operator delete(void*) {}
@@ -79,6 +100,10 @@ public: // aliases and enums
 		friend PersistentBuffer;
 	};
 	using BufferPtr = std::shared_ptr<Buffer>;
+
+#if PERSISTENTBUFFER_TRACKING >= 2
+	using tracking_data_t = std::pair<std::string, int>;
+#endif
 
 public: // methods
 	/*!
@@ -157,7 +182,11 @@ public: // methods
 	\param min_size The minimum amount of bytes the buffer must provide.
 	\return A std::shared_ptr to the memory of the PersistentBuffer buffer.
 	*/
-	static BufferPtr single_buffer(uint32_t min_size);
+	static BufferPtr single_buffer(uint32_t min_size
+#if PERSISTENTBUFFER_TRACKING >= 2
+	, const tracking_data_t& caller = tracking_data_t()
+#endif
+	);
 
 	/*!
 	Retrieve a buffer from the PersistentBuffer that contains at least
@@ -168,7 +197,11 @@ public: // methods
 	\param size The number of bytes in the provided content.
 	\return A std::shared_ptr to the memory of the PersistentBuffer buffer.
 	*/
-	static BufferPtr single_buffer_from(const uint8_t* data, uint32_t size);
+	static BufferPtr single_buffer_from(const uint8_t* data, uint32_t size
+#if PERSISTENTBUFFER_TRACKING >= 2
+	, const tracking_data_t& caller = tracking_data_t()
+#endif
+	);
 
 	/*!
 	Retrieve a buffer from the PersistentBuffer that contains at least
@@ -179,7 +212,24 @@ public: // methods
 	\param size The number of bytes in the provided content.
 	\return A std::shared_ptr to the memory of the PersistentBuffer buffer.
 	*/
-	static BufferPtr single_buffer_from(const char* data, size_t size);
+	static BufferPtr single_buffer_from(const char* data, size_t size
+#if PERSISTENTBUFFER_TRACKING >= 2
+	, const tracking_data_t& caller = tracking_data_t()
+#endif
+	);
+
+	/*!
+	Retrieve a buffer from the PersistentBuffer that that can hold the
+	value in the provided string, and copy that string data into it.
+
+	\param data The string value to be placed into the buffer.
+	\return A std::shared_ptr to the memory of the PersistentBuffer buffer.
+	*/
+	static BufferPtr single_buffer_from(const std::string& data
+#if PERSISTENTBUFFER_TRACKING >= 2
+	, const tracking_data_t& caller = tracking_data_t()
+#endif
+	);
 
 	/*!
 	Checks to see if a BufferPtr is currently holding valid content.
@@ -187,9 +237,20 @@ public: // methods
 	\param buffer The buffer to check.
 	*/
 	static bool buffer_in_use(BufferPtr buffer);
+	static bool release_buffer(BufferPtr buffer
+#if PERSISTENTBUFFER_TRACKING >= 2
+	, const tracking_data_t& caller = tracking_data_t()
+#endif
+	);
+	static bool release_buffers(const std::vector<PersistentBuffer::BufferPtr>& buffers
+#if PERSISTENTBUFFER_TRACKING >= 2
+	, const tracking_data_t& caller = tracking_data_t()
+#endif
+	);
 
-	static bool release_buffer(BufferPtr buffer);
-	static bool release_buffers(const std::vector<PersistentBuffer::BufferPtr>& buffers);
+#if PERSISTENTBUFFER_TRACKING >= 2
+	static void report_tracking();
+#endif
 
 private: // aliases and enums
 	using BufferMap = std::map<BufferPtr, bool>;
